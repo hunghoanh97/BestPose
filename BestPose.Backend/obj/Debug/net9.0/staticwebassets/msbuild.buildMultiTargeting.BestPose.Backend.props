@@ -1,0 +1,3 @@
+﻿<Project>
+  <Import Project="..\build\BestPose.Backend.props" />
+</Project>
