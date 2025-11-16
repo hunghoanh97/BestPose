@@ -1,4 +1,7 @@
 using System.Text.Json.Serialization;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Processing;
+using SixLabors.ImageSharp.Formats.Jpeg;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -31,11 +34,10 @@ static byte[]? DecodeBase64(string? data)
 }
 
 // Endpoint: person pose
-app.MapPost("/pose/analyze", (AnalyzeRequest req) =>
+app.MapPost("/pose/analyze", async (AnalyzeRequest req) =>
 {
-    var _ = DecodeBase64(req.imageBase64); // hiện chưa dùng ảnh
+    var bytes = DecodeBase64(req.imageBase64);
 
-    // Tips động theo meta
     var tips = new List<string>();
     var orientation = req.meta?.orientation?.ToLowerInvariant();
     var facing = req.meta?.facing?.ToLowerInvariant();
@@ -52,7 +54,6 @@ app.MapPost("/pose/analyze", (AnalyzeRequest req) =>
     if (facing == "front") tips.Add("Giữ vai thẳng, khoanh tay tự nhiên");
     else tips.Add("Xoay hông nhẹ theo hướng camera để tạo đường cong");
 
-    // Lines thirds theo orientation
     var lines = new List<ShapeLine>();
     double yTop = 0.33, yBottom = 0.66, xLeft = 0.33, xRight = 0.66;
     lines.Add(new ShapeLine(0.05, yTop, 0.95, yTop));
@@ -60,11 +61,61 @@ app.MapPost("/pose/analyze", (AnalyzeRequest req) =>
     lines.Add(new ShapeLine(xLeft, 0.05, xLeft, 0.95));
     lines.Add(new ShapeLine(xRight, 0.05, xRight, 0.95));
 
-    // Gợi ý horizon (demo) tùy theo pitch
     double horizonY = pitch > 0 ? 0.25 : (pitch < 0 ? 0.75 : 0.33);
     lines.Add(new ShapeLine(0.05, horizonY, 0.95, horizonY));
 
-    var result = new AiSuggestionResult(lines, tips, null);
+    List<AiKeypoint>? keypoints = null;
+    try
+    {
+        var apiKey = app.Configuration["DEEPSEEK_API_KEY"] ?? Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY");
+        if (!string.IsNullOrWhiteSpace(apiKey) && bytes != null)
+        {
+            using var http = new HttpClient();
+            http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+
+            var baseUrl = app.Configuration["DEEPSEEK_BASE_URL"] ?? "https://api.deepseek.com";
+            var model = app.Configuration["DEEPSEEK_MODEL"] ?? "deepseek-chat";
+
+            var b64 = Convert.ToBase64String(bytes);
+            var payload = new
+            {
+                model,
+                messages = new object[]
+                {
+                    new
+                    {
+                        role = "user",
+                        content = new object[]
+                        {
+                            new { type = "input_text", text = "Phân tích ảnh người và trả về JSON keypoints với tên và toạ độ chuẩn hoá trong [0,1]. Các keypoints: nose,left_shoulder,right_shoulder,left_elbow,right_elbow,left_hip,right_hip,left_knee,right_knee. Chỉ trả JSON, không văn bản." },
+                            new { type = "input_image", image_url = $"data:image/jpeg;base64,{b64}" }
+                        }
+                    }
+                },
+                stream = false
+            };
+
+            var reqMsg = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/chat/completions")
+            {
+                Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(payload), System.Text.Encoding.UTF8, "application/json")
+            };
+            var resp = await http.SendAsync(reqMsg);
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            var content = root.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString();
+            if (!string.IsNullOrWhiteSpace(content))
+            {
+                var parsed = System.Text.Json.JsonSerializer.Deserialize<List<AiKeypoint>>(content, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                keypoints = parsed;
+            }
+        }
+    }
+    catch
+    {
+    }
+
+    var result = new AiSuggestionResult(lines, tips, keypoints, null);
     return Results.Json(result, new System.Text.Json.JsonSerializerOptions
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
@@ -97,7 +148,46 @@ app.MapPost("/scenery/analyze", (AnalyzeRequest req) =>
     double horizonY = pitch > 0 ? 0.25 : (pitch < 0 ? 0.75 : 0.33);
     lines.Add(new ShapeLine(0.05, horizonY, 0.95, horizonY));
 
-    var result = new AiSuggestionResult(lines, tips, null);
+    var result = new AiSuggestionResult(lines, tips, null, null);
+    return Results.Json(result, new System.Text.Json.JsonSerializerOptions
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    });
+});
+
+// Endpoint: auto tune brightness/contrast
+app.MapPost("/image/tune", (AnalyzeRequest req) =>
+{
+    var bytes = DecodeBase64(req.imageBase64);
+    if (bytes == null) return Results.BadRequest();
+
+    using var img = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(bytes);
+    double sum = 0;
+    double cnt = 0;
+    img.ProcessPixelRows(accessor =>
+    {
+        for (int y = 0; y < accessor.Height; y++)
+        {
+            var row = accessor.GetRowSpan(y);
+            for (int x = 0; x < row.Length; x++)
+            {
+                var p = row[x];
+                var lum = (0.2126 * p.R + 0.7152 * p.G + 0.0722 * p.B);
+                sum += lum;
+                cnt += 1;
+            }
+        }
+    });
+    var mean = sum / Math.Max(1, cnt);
+    float bAdj = mean < 110 ? 0.20f : (mean > 150 ? -0.08f : 0.0f);
+    float cAdj = mean < 120 ? 0.18f : 0.06f;
+
+    img.Mutate(ctx => ctx.Brightness(bAdj).Contrast(cAdj));
+    using var ms = new MemoryStream();
+    img.SaveAsJpeg(ms);
+    var tuned = Convert.ToBase64String(ms.ToArray());
+
+    var result = new AiSuggestionResult(null, null, null, tuned);
     return Results.Json(result, new System.Text.Json.JsonSerializerOptions
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull

@@ -26,3 +26,7 @@ D:\Reactjs\BestPose\BestPose.Backend\obj\Debug\net9.0\refint\BestPose.Backend.dl
 D:\Reactjs\BestPose\BestPose.Backend\obj\Debug\net9.0\BestPose.Backend.pdb
 D:\Reactjs\BestPose\BestPose.Backend\obj\Debug\net9.0\BestPose.Backend.genruntimeconfig.cache
 D:\Reactjs\BestPose\BestPose.Backend\obj\Debug\net9.0\ref\BestPose.Backend.dll
+D:\Reactjs\BestPose\bestpose.backend\bin\Debug\net9.0\SixLabors.ImageSharp.dll
+D:\Reactjs\BestPose\bestpose.backend\obj\Debug\net9.0\BestPose.Backend.csproj.AssemblyReference.cache
+D:\Reactjs\BestPose\bestpose.backend\obj\Debug\net9.0\BestPose.Backend.sourcelink.json
+D:\Reactjs\BestPose\bestpose.backend\obj\Debug\net9.0\BestPose.3AD8AB7B.Up2Date

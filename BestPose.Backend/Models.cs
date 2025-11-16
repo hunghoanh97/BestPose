@@ -5,7 +5,8 @@ public record AiKeypoint(string name, double x, double y, double? score);
 public record AiSuggestionResult(
     List<ShapeLine>? lines,
     List<string>? tips,
-    List<AiKeypoint>? keypoints
+    List<AiKeypoint>? keypoints,
+    string? tunedImageBase64
 );
 
 public record AnalyzeMeta(
