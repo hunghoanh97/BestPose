@@ -1,0 +1,26 @@
+# Build artifacts
+bin/
+obj/
+
+# Visual Studio / IDE
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.idea/
+
+# Test results / temp
+TestResults/
+*.VisualState.xml
+*.bench*
+
+# ReSharper / Rider
+_ReSharper*/
+*.DotSettings.user
+
+# Logs
+*.log
+
+# Local secrets (do not commit)
+appsettings.*.local.json
